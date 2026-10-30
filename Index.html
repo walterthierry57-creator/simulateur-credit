@@ -1,1 +1,259 @@
 
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulateur d'Emprunt Bancaire & Tableau d'Amortissement</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --accent: #10b981;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 20px 10px;
+      display: flex;
+      justify-content: center;
+    }
+    .app { max-width: 900px; width: 100%; }
+    header { text-align: center; margin-bottom: 24px; }
+    h1 { margin: 0 0 8px 0; font-size: 1.8rem; color: var(--text); }
+    p { margin: 0; color: var(--muted); }
+    
+    .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    @media (min-width: 768px) { .grid { grid-template-columns: 1fr 1fr; } }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+    input {
+      width: 100%;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #0f172a;
+      color: white;
+      font-size: 1rem;
+      box-sizing: border-box;
+    }
+    
+    .kpi-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+    .kpi { background: #0f172a; padding: 12px; border-radius: 8px; border: 1px solid var(--border); text-align: center; }
+    .kpi-title { font-size: 0.75rem; color: var(--muted); }
+    .kpi-value { font-size: 1.2rem; font-weight: bold; color: var(--accent); margin-top: 4px; }
+
+    .table-container { overflow-x: auto; max-height: 400px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: right; }
+    th, td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    th { background: #0f172a; color: var(--muted); position: sticky; top: 0; }
+    
+    .btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 10px;
+    }
+    .btn:hover { background: var(--primary-hover); }
+  </style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <h1>🏦 Simulateur d'Emprunt Bancaire</h1>
+    <p>Calculez vos mensualités et visualisez le tableau d'amortissement</p>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <div class="form-group">
+        <label>Montant du prêt (€)</label>
+        <input type="number" id="capital" value="200000" step="1000">
+      </div>
+      <div class="form-group">
+        <label>Taux d'intérêt nominal (% annuel)</label>
+        <input type="number" id="taux" value="3.5" step="0.1">
+      </div>
+      <div class="form-group">
+        <label>Durée du prêt (années)</label>
+        <input type="number" id="duree" value="20" min="1" max="30">
+      </div>
+      <div class="form-group">
+        <label>Taux d'assurance (% annuel - optionnel)</label>
+        <input type="number" id="assurance" value="0.3" step="0.05">
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="kpi-container">
+        <div class="kpi">
+          <div class="kpi-title">Mensualité (hors ass.)</div>
+          <div class="kpi-value" id="resMensualite">0 €</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-title">Coût Intérêts</div>
+          <div class="kpi-value" id="resInterets">0 €</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-title">Coût Total Prêt</div>
+          <div class="kpi-value" id="resTotal">0 €</div>
+        </div>
+      </div>
+      <div style="max-height: 200px; display: flex; justify-content: center;">
+        <canvas id="chartPie"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <br>
+
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <h3 style="margin:0;">Tableau d'Amortissement</h3>
+      <button class="btn" id="btnCsv" style="width: auto;">📥 Télécharger en CSV (Excel)</button>
+    </div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Mois</th>
+            <th>Mensualité</th>
+            <th>Capital</th>
+            <th>Intérêts</th>
+            <th>Assurance</th>
+            <th>Capital Restant</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  let chartInstance = null;
+  let amortissementData = [];
+
+  function calculerPret() {
+    const Z = parseFloat(document.getElementById('capital').value) || 0;
+    const Y = parseFloat(document.getElementById('taux').value) || 0;
+    const X = parseInt(document.getElementById('duree').value) || 0;
+    const A = parseFloat(document.getElementById('assurance').value) || 0;
+
+    if (Z <= 0 || Y <= 0 || X <= 0) return;
+
+    const n = X * 12;
+    const r = (Y / 100) / 12;
+    const mensualiteCapitalInteret = Z * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+    const mensAssurance = (Z * (A / 100)) / 12;
+    const mensualiteTotale = mensualiteCapitalInteret + mensAssurance;
+
+    let capitalRestant = Z;
+    let totalInterets = 0;
+    let totalAssurance = 0;
+    amortissementData = [];
+
+    const tbody = document.getElementById('tableBody');
+    tbody.innerHTML = '';
+
+    for (let i = 1; i <= n; i++) {
+      const interetsMois = capitalRestant * r;
+      const capitalAmorti = mensualiteCapitalInteret - interetsMois;
+      capitalRestant -= capitalAmorti;
+      if (capitalRestant < 0) capitalRestant = 0;
+
+      totalInterets += interetsMois;
+      totalAssurance += mensAssurance;
+
+      amortissementData.push({
+        mois: i,
+        mensualite: mensualiteTotale,
+        capital: capitalAmorti,
+        interets: interetsMois,
+        assurance: mensAssurance,
+        restant: capitalRestant
+      });
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${i}</td>
+        <td>${mensualiteTotale.toFixed(2)} €</td>
+        <td>${capitalAmorti.toFixed(2)} €</td>
+        <td>${interetsMois.toFixed(2)} €</td>
+        <td>${mensAssurance.toFixed(2)} €</td>
+        <td>${capitalRestant.toFixed(2)} €</td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    document.getElementById('resMensualite').textContent = mensualiteCapitalInteret.toFixed(2) + ' €';
+    document.getElementById('resInterets').textContent = totalInterets.toFixed(0) + ' €';
+    document.getElementById('resTotal').textContent = (Z + totalInterets + totalAssurance).toFixed(0) + ' €';
+
+    updateChart(Z, totalInterets, totalAssurance);
+  }
+
+  function updateChart(capital, interets, assurance) {
+    const ctx = document.getElementById('chartPie').getContext('2d');
+    if (chartInstance) chartInstance.destroy();
+
+    chartInstance = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Capital Emprunté', 'Intérêts Totaux', 'Assurance Totale'],
+        datasets: [{
+          data: [capital, interets, assurance],
+          backgroundColor: ['#3b82f6', '#ef4444', '#10b981'],
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#94a3b8' } } }
+      }
+    });
+  }
+
+  document.getElementById('btnCsv').onclick = function() {
+    let csv = 'Mois;Mensualite;Capital;Interets;Assurance;Capital Restant\n';
+    amortissementData.forEach(r => {
+      csv += `${r.mois};${r.mensualite.toFixed(2)};${r.capital.toFixed(2)};${r.interets.toFixed(2)};${r.assurance.toFixed(2)};${r.restant.toFixed(2)}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'Tableau_Amortissement.csv';
+    link.click();
+  };
+
+  ['capital', 'taux', 'duree', 'assurance'].forEach(id => {
+    document.getElementById(id).addEventListener('input', calculerPret);
+  });
+
+  calculerPret();
+</script>
+</body>
+</html>
